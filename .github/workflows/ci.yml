@@ -21,14 +21,12 @@ jobs:
       uses: actions/setup-node@v4
       with:
         node-version: 20
-        cache: npm
-        cache-dependency-path: services/api-gateway/package-lock.json
 
     - name: Install & lint Node services
       run: |
         for svc in api-gateway auth-service user-service booking-service payment-service notification-service; do
           echo "=== $svc ==="
-          cd services/$svc && npm ci && cd ../..
+          cd services/$svc && npm install && cd ../..
         done
 
     - name: Set up Python 3.11
