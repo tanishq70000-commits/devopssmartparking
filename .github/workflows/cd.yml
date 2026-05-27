@@ -1,7 +1,10 @@
 name: CD Pipeline
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -15,6 +18,7 @@ jobs:
     name: Deploy to EC2
     runs-on: ubuntu-latest
     environment: production
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
     - uses: actions/checkout@v4
 
