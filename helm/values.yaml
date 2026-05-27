@@ -1,0 +1,21 @@
+replicaCount: 2
+
+image:
+  repository: smartparking
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  type: ClusterIP
+  port: 8000
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: smartparking.local
+      paths:
+        - path: /
+          pathType: Prefix
+        - path: /admin
+          pathType: Prefix

@@ -1,0 +1,108 @@
+name: CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      rollback:
+        description: "Rollback to previous deployment? (yes/no)"
+        required: false
+        default: "no"
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Setup SSH agent
+      uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+    - name: Prepare remote directory and transfer files
+      run: |
+        ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} "mkdir -p /opt/smartparking"
+        scp -o StrictHostKeyChecking=no -r docker-compose.prod.yml docker-compose.observability.yml observability ubuntu@${{ secrets.EC2_HOST }}:/opt/smartparking/
+
+    - name: Authenticate remote Docker to GHCR
+      run: |
+        ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} "echo '${{ secrets.GITHUB_TOKEN }}' | docker login ghcr.io -u ${{ github.actor }} --password-stdin"
+
+    - name: Deploy (or rollback) via SSH
+      run: |
+        ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} << 'REMOTE'
+          set -e
+          APP_DIR=/opt/smartparking
+          cd $APP_DIR
+
+          # Determine registry / image prefix
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "IMAGE_PREFIX=$OWNER/smartparking" > .env
+          
+          if [ ! -z "${{ secrets.JWT_SECRET }}" ]; then
+            echo "JWT_SECRET=${{ secrets.JWT_SECRET }}" >> .env
+          fi
+
+          if [ "${{ github.event.inputs.rollback }}" = "yes" ]; then
+            echo "=== ROLLBACK: Restoring previous compose stack ==="
+            cp docker-compose.prod.yml.bak docker-compose.prod.yml || true
+            docker compose -f docker-compose.prod.yml up -d
+            echo "Rollback complete."
+            exit 0
+          fi
+
+          echo "=== DEPLOY: Backup and prepare compose files ==="
+          # Backup current compose file for rollback
+          cp docker-compose.prod.yml docker-compose.prod.yml.bak || true
+
+          echo "=== Pulling latest images ==="
+          docker compose -f docker-compose.prod.yml pull
+
+          echo "=== Blue-Green: starting new containers ==="
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+          echo "=== Health check ==="
+          sleep 25
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check FAILED ($STATUS). Triggering rollback..."
+            cp docker-compose.prod.yml.bak docker-compose.prod.yml
+            docker compose -f docker-compose.prod.yml up -d
+            exit 1
+          fi
+
+          echo "=== Cleanup old images ==="
+          docker image prune -f
+
+          echo "Deploy successful."
+        REMOTE
+
+    - name: Notify Slack on success
+      if: success()
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      run: |
+        if [ ! -z "$SLACK_WEBHOOK" ]; then
+          curl -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            --data '{"text":"✅ SmartParking deployed successfully from branch main (SHA: ${{ github.sha }})"}'
+        else
+          echo "Slack webhook not configured, skipping notification."
+        fi
+
+    - name: Notify Slack on failure
+      if: failure()
+      env:
+        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+      run: |
+        if [ ! -z "$SLACK_WEBHOOK" ]; then
+          curl -X POST "$SLACK_WEBHOOK" \
+            -H 'Content-type: application/json' \
+            --data '{"text":"❌ SmartParking deployment FAILED. Rollback triggered. SHA: ${{ github.sha }}"}'
+        else
+          echo "Slack webhook not configured, skipping notification."
+        fi

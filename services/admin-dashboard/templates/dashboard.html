@@ -1,0 +1,182 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Smart Parking Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<meta name="csrf-token" content="{{ csrf_token }}">
+</head>
+<body class="bg-gray-100 font-sans">
+
+<div class="container mx-auto p-6">
+
+    <!-- Header -->
+    <h1 class="text-4xl font-bold text-center text-blue-700 mb-8">Smart Parking Dashboard</h1>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-1 sm:grid-cols-4 gap-6 mb-8">
+        <div class="bg-white shadow-lg rounded-lg p-6 text-center">
+            <h2 class="text-lg font-semibold text-gray-700">Available Slots</h2>
+            <p id="available-count" class="text-3xl font-bold text-green-600">{{ available_count }}</p>
+        </div>
+        <div class="bg-white shadow-lg rounded-lg p-6 text-center">
+            <h2 class="text-lg font-semibold text-gray-700">Occupied Slots</h2>
+            <p id="occupied-count" class="text-3xl font-bold text-red-600">{{ occupied_count }}</p>
+        </div>
+        <div class="bg-white shadow-lg rounded-lg p-6 text-center">
+            <h2 class="text-lg font-semibold text-gray-700">Total Cars Today</h2>
+            <p id="total-cars" class="text-3xl font-bold text-blue-600">{{ total_cars }}</p>
+        </div>
+        <div class="bg-white shadow-lg rounded-lg p-6 text-center">
+            <h2 class="text-lg font-semibold text-gray-700">Revenue Today (₹)</h2>
+            <p id="total-revenue" class="text-3xl font-bold text-yellow-600">{{ total_revenue }}</p>
+        </div>
+    </div>
+
+    <!-- Vehicle Entry/Exit Forms -->
+    <div class="flex flex-col md:flex-row gap-6 mb-6 justify-center">
+        <div class="bg-white shadow-lg rounded-lg p-6 w-full md:w-80">
+            <h2 class="text-xl font-semibold mb-4 text-center">Vehicle Entry</h2>
+            <input type="text" id="entry-input" placeholder="Vehicle Number" class="border rounded p-2 w-full mb-4 uppercase">
+            <button onclick="handleAction('entry')" class="bg-green-600 hover:bg-green-700 text-white font-semibold px-4 py-2 w-full rounded">Enter</button>
+        </div>
+        <div class="bg-white shadow-lg rounded-lg p-6 w-full md:w-80">
+            <h2 class="text-xl font-semibold mb-4 text-center">Vehicle Exit</h2>
+            <input type="text" id="exit-input" placeholder="Vehicle Number" class="border rounded p-2 w-full mb-4 uppercase">
+            <button onclick="handleAction('exit')" class="bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 w-full rounded">Exit</button>
+        </div>
+    </div>
+
+    <!-- Inline Notification -->
+    <div id="vehicleResponse" class="max-w-2xl mx-auto text-center mb-6"></div>
+
+    <!-- Search -->
+    <form method="get" class="flex justify-center mb-6">
+        <input type="text" name="search" class="border rounded p-2 w-80" placeholder="Search Vehicle" value="{{ search_number }}">
+        <button type="submit" class="ml-3 bg-blue-700 hover:bg-blue-800 text-white font-semibold px-4 py-2 rounded">Search</button>
+    </form>
+
+    <!-- Search Results -->
+    
+
+    <!-- Parking Slots Grid -->
+    <div id="slots-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4 max-w-4xl mx-auto mb-6">
+        {% for slot in slots %}
+        <div class="p-4 rounded text-white font-semibold text-center transition-transform transform hover:scale-105 duration-200 {% if slot.occupied %}bg-red-600{% else %}bg-green-600{% endif %}">
+            Slot {{ slot.number }}
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Pagination -->
+    <!-- Modern Pagination -->
+<div id="pagination" class="flex justify-center mt-6 gap-2 items-center">
+    {% if current_page > 1 %}
+        <a href="?page={{ current_page|add:'-1' }}" 
+           class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-400 hover:text-white transition">
+            &laquo; Previous
+        </a>
+    {% endif %}
+
+    <span class="px-4 py-2 bg-blue-600 text-white rounded shadow">
+        Page {{ current_page }} of {{ total_pages }}
+    </span>
+
+    {% if current_page < total_pages %}
+        <a href="?page={{ current_page|add:'1' }}" 
+           class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-400 hover:text-white transition">
+            Next &raquo;
+        </a>
+    {% endif %}
+</div>
+
+    {% if search_result %}
+    <div class="overflow-x-auto max-w-4xl mx-auto mb-6 mt-6">
+        <table class="w-full bg-white shadow-lg rounded-lg">
+            <thead class="bg-blue-700 text-white">
+                <tr>
+                    <th class="p-3 text-left">Vehicle Number</th>
+                    <th class="p-3 text-left">Slot</th>
+                    <th class="p-3 text-left">Entry Time</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for vehicle in search_result %}
+                <tr class="border-t text-center hover:bg-gray-50">
+                    <td class="p-2">{{ vehicle.vehicle_number }}</td>
+                    <td class="p-2">{{ vehicle.slot }}</td>
+                    <td class="p-2">{{ vehicle.entry_time|date:"d M Y H:i" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% elif search_message %}
+    <div class="text-center text-red-600 font-semibold mb-6">{{ search_message }}</div>
+    {% endif %}
+
+</div>
+
+<script>
+async function handleAction(action){
+    const input=document.getElementById(action+"-input");
+    const vehicle_number=input.value.trim();
+    if(!vehicle_number){ alert("Enter a vehicle number"); return; }
+
+    const formData=new FormData();
+    formData.append("action",action);
+    formData.append("vehicle_number",vehicle_number);
+
+    const csrfToken=document.querySelector('meta[name="csrf-token"]').content;
+
+    const res=await fetch("",{
+        method:"POST",
+        headers:{"X-CSRFToken":csrfToken,"X-Requested-With":"XMLHttpRequest"},
+        body:formData
+    });
+
+    const data=await res.json();
+    const respDiv=document.getElementById("vehicleResponse");
+    let links="";
+
+    if(data.error){
+        respDiv.innerHTML=`<div class="bg-red-100 text-red-700 p-3 rounded">${data.error}</div>`;
+    } else if(data.success){
+        if(data.slip_url) links+=`
+            <span class="ml-2">
+                <a href="${data.slip_url}" target="_blank" class="text-blue-600 underline mr-2">Open Slip</a>
+                <a href="${data.slip_url}" download class="text-green-600 underline mr-2">Download</a>
+                <a href="#" onclick="window.open('${data.slip_url}').print();" class="text-red-600 underline">Print</a>
+            </span>`;
+        if(data.pdf_url) links+=`
+            <span class="ml-2">
+                <a href="${data.pdf_url}" target="_blank" class="text-blue-600 underline mr-2">Open Bill</a>
+                <a href="${data.pdf_url}" download class="text-green-600 underline mr-2">Download</a>
+                <a href="#" onclick="window.open('${data.pdf_url}').print();" class="text-red-600 underline">Print</a>
+            </span>`;
+        respDiv.innerHTML=`<div class="bg-green-100 text-green-700 p-3 rounded">${data.success} ${links}</div>`;
+    }
+
+    // Update counts and daily totals dynamically
+    document.getElementById("available-count").innerText=data.available_count;
+    document.getElementById("occupied-count").innerText=data.occupied_count;
+    if(data.total_cars!==undefined) document.getElementById("total-cars").innerText=data.total_cars;
+    if(data.total_revenue!==undefined) document.getElementById("total-revenue").innerText=data.total_revenue;
+
+    // Update slots grid
+    const grid=document.getElementById("slots-grid");
+    grid.innerHTML="";
+    data.slots.forEach(slot=>{
+        const div=document.createElement("div");
+        div.className=`p-4 rounded text-white font-semibold text-center transition-transform transform hover:scale-105 duration-200 ${slot.occupied?'bg-red-600':'bg-green-600'}`;
+        div.innerText=`Slot ${slot.number}`;
+        grid.appendChild(div);
+    });
+
+    input.value="";
+}
+</script>
+</body>
+</html>

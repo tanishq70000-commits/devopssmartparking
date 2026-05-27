@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: smart-parking-config
+  namespace: smart-parking
+data:
+  NODE_ENV: "production"
+  PORT: "8000"

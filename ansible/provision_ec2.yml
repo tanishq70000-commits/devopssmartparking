@@ -1,0 +1,108 @@
+---
+- name: Provision Smart Parking EC2 Server
+  hosts: ec2
+  become: true
+
+  vars:
+    app_dir: /opt/smartparking
+    github_repo: https://github.com/YOUR_ORG/smart-parking.git
+
+  tasks:
+    - name: Update apt packages
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Install prerequisites
+      apt:
+        name:
+          - curl
+          - git
+          - ca-certificates
+          - gnupg
+          - lsb-release
+          - unzip
+          - htop
+        state: present
+
+    - name: Add Docker GPG key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker repository
+      apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/ubuntu {{ ansible_lsb.codename }} stable"
+        state: present
+
+    - name: Install Docker CE
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-compose-plugin
+        state: present
+        update_cache: yes
+
+    - name: Enable and start Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Install k3s (lightweight Kubernetes)
+      shell: curl -sfL https://get.k3s.io | sh -
+      args:
+        creates: /usr/local/bin/k3s
+
+    - name: Create app directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Create media directory
+      file:
+        path: "{{ app_dir }}/media"
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Clone the repository
+      git:
+        repo: "{{ github_repo }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+      become_user: ubuntu
+
+    - name: Start production stack
+      shell: docker compose -f docker-compose.prod.yml up -d
+      args:
+        chdir: "{{ app_dir }}"
+      become_user: ubuntu
+
+    - name: Start observability stack
+      shell: docker compose -f docker-compose.observability.yml up -d
+      args:
+        chdir: "{{ app_dir }}"
+      become_user: ubuntu
+
+    - name: Print server info
+      debug:
+        msg:
+          - "App: http://{{ ansible_host }}:8000"
+          - "Admin: http://{{ ansible_host }}:8080"
+          - "Grafana: http://{{ ansible_host }}:3000"
+          - "Prometheus: http://{{ ansible_host }}:9090"
+          - "RabbitMQ: http://{{ ansible_host }}:15672"
+          - "Jaeger: http://{{ ansible_host }}:16686"

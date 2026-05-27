@@ -1,0 +1,173 @@
+version: '3.8'
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: smartparking
+      POSTGRES_PASSWORD: smartparking_db_pass
+      POSTGRES_DB: smartparking
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "smartparking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: smartparking_pass
+    ports:
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Microservices ───────────────────────────────────────────────
+  api-gateway:
+    image: ghcr.io/${IMAGE_PREFIX}/api-gateway:latest
+    restart: always
+    ports:
+      - "80:8000"
+    environment:
+      - PORT=8000
+      - NODE_ENV=production
+    depends_on:
+      - auth-service
+      - user-service
+
+  auth-service:
+    image: ghcr.io/${IMAGE_PREFIX}/auth-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - JWT_SECRET=${JWT_SECRET:-prod_jwt_secret_key_change_me}
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  user-service:
+    image: ghcr.io/${IMAGE_PREFIX}/user-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  parking-slot-service:
+    image: ghcr.io/${IMAGE_PREFIX}/parking-slot-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  booking-service:
+    image: ghcr.io/${IMAGE_PREFIX}/booking-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      - RABBITMQ_URL=amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  payment-service:
+    image: ghcr.io/${IMAGE_PREFIX}/payment-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      - RABBITMQ_URL=amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  notification-service:
+    image: ghcr.io/${IMAGE_PREFIX}/notification-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - RABBITMQ_URL=amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  vehicle-tracking-service:
+    image: ghcr.io/${IMAGE_PREFIX}/vehicle-tracking-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  analytics-service:
+    image: ghcr.io/${IMAGE_PREFIX}/analytics-service:latest
+    restart: always
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      - RABBITMQ_URL=amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  admin-dashboard:
+    image: ghcr.io/${IMAGE_PREFIX}/admin-dashboard:latest
+    restart: always
+    ports:
+      - "8080:8000"
+    environment:
+      - PORT=8000
+    volumes:
+      - /opt/smartparking/db.sqlite3:/app/db.sqlite3
+      - /opt/smartparking/media:/app/media
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:

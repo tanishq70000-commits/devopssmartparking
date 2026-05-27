@@ -1,0 +1,177 @@
+version: '3.8'
+
+services:
+  # ── Infrastructure ──────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: smartparking
+      POSTGRES_PASSWORD: smartparking_db_pass
+      POSTGRES_DB: smartparking
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "smartparking"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: smartparking_pass
+    ports:
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Microservices ───────────────────────────────────────────────
+  api-gateway:
+    build: ./services/api-gateway
+    ports:
+      - "8000:8000"
+    environment:
+      PORT: "8000"
+      NODE_ENV: development
+    depends_on:
+      auth-service:
+        condition: service_started
+      user-service:
+        condition: service_started
+
+  auth-service:
+    build: ./services/auth-service
+    ports:
+      - "8001:8000"
+    environment:
+      PORT: "8000"
+      JWT_SECRET: local_jwt_secret_key
+      DATABASE_URL: postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  user-service:
+    build: ./services/user-service
+    ports:
+      - "8002:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  parking-slot-service:
+    build: ./services/parking-slot-service
+    ports:
+      - "8003:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  booking-service:
+    build: ./services/booking-service
+    ports:
+      - "8004:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      RABBITMQ_URL: amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  payment-service:
+    build: ./services/payment-service
+    ports:
+      - "8005:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      RABBITMQ_URL: amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  notification-service:
+    build: ./services/notification-service
+    ports:
+      - "8006:8000"
+    environment:
+      PORT: "8000"
+      RABBITMQ_URL: amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  vehicle-tracking-service:
+    build: ./services/vehicle-tracking-service
+    ports:
+      - "8007:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  analytics-service:
+    build: ./services/analytics-service
+    ports:
+      - "8008:8000"
+    environment:
+      PORT: "8000"
+      DATABASE_URL: postgresql://smartparking:smartparking_db_pass@postgres:5432/smartparking
+      RABBITMQ_URL: amqp://admin:smartparking_pass@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  admin-dashboard:
+    build: ./services/admin-dashboard
+    ports:
+      - "8080:8000"
+    environment:
+      PORT: "8000"
+    volumes:
+      - ./services/admin-dashboard/db.sqlite3:/app/db.sqlite3
+      - ./services/admin-dashboard/media:/app/media
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
