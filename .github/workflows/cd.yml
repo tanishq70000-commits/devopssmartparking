@@ -25,7 +25,7 @@ jobs:
 
     - name: Prepare remote directory and transfer files
       run: |
-        ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} "mkdir -p /opt/smartparking"
+        ssh -o StrictHostKeyChecking=no ubuntu@${{ secrets.EC2_HOST }} "sudo mkdir -p /opt/smartparking && sudo chown -R ubuntu:ubuntu /opt/smartparking"
         scp -o StrictHostKeyChecking=no -r docker-compose.prod.yml docker-compose.observability.yml observability ubuntu@${{ secrets.EC2_HOST }}:/opt/smartparking/
 
     - name: Authenticate remote Docker to GHCR
@@ -86,12 +86,12 @@ jobs:
       env:
         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
       run: |
-        if [ ! -z "$SLACK_WEBHOOK" ]; then
+        if [[ "$SLACK_WEBHOOK" =~ ^https?:// ]]; then
           curl -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
             --data '{"text":"✅ SmartParking deployed successfully from branch main (SHA: ${{ github.sha }})"}'
         else
-          echo "Slack webhook not configured, skipping notification."
+          echo "Slack webhook is empty or invalid, skipping notification."
         fi
 
     - name: Notify Slack on failure
@@ -99,10 +99,10 @@ jobs:
       env:
         SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
       run: |
-        if [ ! -z "$SLACK_WEBHOOK" ]; then
+        if [[ "$SLACK_WEBHOOK" =~ ^https?:// ]]; then
           curl -X POST "$SLACK_WEBHOOK" \
             -H 'Content-type: application/json' \
             --data '{"text":"❌ SmartParking deployment FAILED. Rollback triggered. SHA: ${{ github.sha }}"}'
         else
-          echo "Slack webhook not configured, skipping notification."
+          echo "Slack webhook is empty or invalid, skipping notification."
         fi
